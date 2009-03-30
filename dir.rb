@@ -18,6 +18,9 @@
 # --port x, -p x:
 #    bind to port x
 #
+# --erb -E
+#    for files ending with .erb interpret the files as ruby erb   
+#
 # --daemonize, -d:
 #    daemonize the server process
 #
@@ -39,8 +42,9 @@ require 'thin'
 
 
 class DirServ
-  def initialize(docroot=FileUtils.pwd)
+  def initialize(enable_erb=false, docroot=FileUtils.pwd)
     @docroot = docroot
+    @enable_erb = enable_erb
   end
 
   def call(env)
@@ -71,10 +75,17 @@ class DirServ
       when '.png' then 'image/png'
       when '.jpg' then 'image/jpeg'
       when '.gif' then 'image/gif'
+      when '.erb' then 'text/html'
       else
         'application/octet-stream'
       end
-      [200,{'Content-Type' => content_type}, File.read(real_path) ]
+      content = File.read(real_path)
+      if @enable_erb and ext == '.erb'
+        erb = ERB.new(content)
+        [200,{'Content-Type' => content_type}, erb.result ]
+      else
+        [200,{'Content-Type' => content_type}, content ]
+      end
     else
       [404,{'Content-Type' => content_type}, "File not found" ]
     end
@@ -96,6 +107,7 @@ class App
       [ '--help', '-h', GetoptLong::NO_ARGUMENT ],
       [ '--port', '-p', GetoptLong::REQUIRED_ARGUMENT ],
       [ '--daemonize', '-d', GetoptLong::NO_ARGUMENT ],
+      [ '--erb', '-E', GetoptLong::NO_ARGUMENT ],
       [ '--pid', '-P', GetoptLong::REQUIRED_ARGUMENT ],
       [ '--log', '-l', GetoptLong::REQUIRED_ARGUMENT ],
       [ '--kill', '-k', GetoptLong::NO_ARGUMENT ]
@@ -125,6 +137,9 @@ class App
           log "pid file path must be absolute"
           exit(1)
         end
+      when '--erb'
+        require 'erb'
+        @enable_erb = true
       when '--log'
         @log_file = arg
         if !File.exist?(File.dirname(@log_file))
@@ -152,7 +167,7 @@ class App
 
   def run_server
 
-    rthttpd = Rack::URLMap.new('/'  => DirServ.new() )
+    rthttpd = Rack::URLMap.new('/'  => DirServ.new(@enable_erb) )
 
     log "Loading server on port: #{@port} with #{@pid_file}"
 
