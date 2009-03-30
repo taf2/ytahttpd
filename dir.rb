@@ -1,4 +1,35 @@
 #!/usr/bin/env ruby
+#
+# Yet another Tiny httpd
+# 
+#  Author: Todd A. Fisher <todd.fisher@gmail.com>
+# 
+# == Synopsis
+#
+# dir: Server files from a local directory - great for doing local development, maybe has other usees
+#
+# == Usage
+#
+# hello [OPTION] ... DIR
+#
+# -h, --help:
+#    show help
+# 
+# --port x, -p x:
+#    bind to port x
+#
+# --daemonize, -d:
+#    daemonize the server process
+#
+# --pid, -P:
+#    path to drop pid file
+#
+# --kill, -k:
+#    kill a running daemonized process
+#
+# --log, -l:
+#    path to log file
+#
 
 require 'ftools'
 require 'fileutils'
@@ -14,7 +45,6 @@ class DirServ
 
   def call(env)
     request_path = env['REQUEST_PATH']
-    puts request_path.inspect
     real_path = File.join(@docroot,request_path)
     if File.directory?(real_path)
       files = Dir["#{real_path}/*"]
@@ -23,7 +53,6 @@ class DirServ
       files.each do|f|
         fp = Pathname.new(f)
         rp = fp.relative_path_from(rootp)
-        puts "link to #{f} => #{rp}"
         output << %(<li><a href="#{rp}">#{File.basename(f)}</a></li>)
       end
       output << "</ul></body></html>"
@@ -60,7 +89,8 @@ rescue LoadError => e
 end
 
 class App
-  def initialize
+  def initialize(docroot)
+    @docroot = docroot
 
     @opts = GetoptLong.new(
       [ '--help', '-h', GetoptLong::NO_ARGUMENT ],
@@ -84,7 +114,7 @@ class App
         if defined?(RDoc)
           RDoc::usage
         else
-          STDERR.puts "missing ruby rdoc"
+          log "missing ruby rdoc"
         end
         exit(0)
       when '--daemonize'
@@ -92,25 +122,24 @@ class App
       when '--pid'
         @pid_file = arg
         if !@pid_file.match(/^\//)
-          STDERR.puts "pid file path must be absolute"
+          log "pid file path must be absolute"
           exit(1)
         end
       when '--log'
         @log_file = arg
         if !File.exist?(File.dirname(@log_file))
-          STDERR.puts "error missing log file folder!"
+          log "error missing log file folder!"
           exit(1)
         end
       when '--port'
         @port = arg.to_i
-        puts "port: #{arg} and #{arg.to_i}"
       when '--kill'
         if File.exist?("#{@docroot}/rthttpd.pid")
           Process.kill("TERM",File.read("#{@docroot}/rthttpd.pid").to_i)
         elsif File.exist?(@pid_file)
           Process.kill("TERM",File.read(@pid_file).to_i)
         else
-          STDERR.puts("No pid file found at #{@docroot}/rthttpd.pid")
+          log("No pid file found at #{@docroot}/rthttpd.pid")
         end
         exit(0)
       end
@@ -125,11 +154,11 @@ class App
 
     rthttpd = Rack::URLMap.new('/'  => DirServ.new() )
 
-    puts "Loading server on port: #{@port} with #{@pid_file}"
+    log "Loading server on port: #{@port} with #{@pid_file}"
 
     server = Thin::Server.new('127.0.0.1', @port, rthttpd)
 
-    puts "Logging to: #{@log_file.inspect}"
+    log "Logging to: #{@log_file.inspect}"
 
     server.log_file = @log_file if @log_file
     server.pid_file = @pid_file if @pid_file
@@ -137,6 +166,7 @@ class App
     if @daemonize
       # daemonized we need a log file path
       server.log_file = "#{@docroot}/rthttpd.log"
+      log "daemonize with #{@log_file} and #{@pid_file}"
       server.daemonize
     end
     server.start
@@ -149,6 +179,6 @@ class App
 end
 
 if $0 == __FILE__
-  app = App.new
+  app = App.new(FileUtils.pwd)
   app.execute
 end
